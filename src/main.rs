@@ -2,11 +2,12 @@ mod utils;
 
 use crate::utils::{millisats_to_sats, parse_peer_info};
 use ldk_node::bitcoin::secp256k1::PublicKey;
+use ldk_node::bitcoin::Network;
 use ldk_node::io::sqlite_store::SqliteStore;
 use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::ln::ChannelId;
+use ldk_node::lightning::offers::offer::Offer;
 use ldk_node::lightning_invoice::Bolt11Invoice;
-use ldk_node::Network;
 use ldk_node::{Builder, Config, LogLevel, Node};
 use std::convert::TryFrom;
 use std::env;
@@ -35,7 +36,7 @@ const DEFAULT_ESPLORA_SERVER: &str = "blockstream.info";
 
 impl AppSettings {
 	fn default() -> Self {
-		let network = Network::Testnet;
+		let network = Network::Bitcoin;
 		Self {
 			ldk_storage_dir_path: "datadir".to_owned(),
 			ldk_peer_listening_port: 9735,
@@ -155,7 +156,7 @@ fn parse_startup_args_string(args: &Vec<String>) -> Result<AppSettings, ()> {
 	Ok(settings)
 }
 
-fn handle_events(node: &Node<SqliteStore>) {
+fn handle_events(node: &Node) {
 	loop {
 		// println!("waiting for events in the background...");
 		let event = node.wait_next_event();
@@ -164,7 +165,7 @@ fn handle_events(node: &Node<SqliteStore>) {
 	}
 }
 
-fn list_peers(node: &Node<SqliteStore>) {
+fn list_peers(node: &Node) {
 	let peers = node.list_peers();
 	if peers.is_empty() {
 		println!("No peers");
@@ -177,7 +178,7 @@ fn list_peers(node: &Node<SqliteStore>) {
 	}
 }
 
-fn list_channels(node: &Node<SqliteStore>) {
+fn list_channels(node: &Node) {
 	let channels = node.list_channels();
 	if channels.is_empty() {
 		println!("No channels");
@@ -189,32 +190,31 @@ fn list_channels(node: &Node<SqliteStore>) {
 	);
 	for ch in channels {
 		println!(
-			"- id {} \tnode {} \tready {} \tcap {} \tbal {} \ttxo {:?}",
+			"- id {} \tnode {} \tready {} \tcap {} \ttxo {:?}",
 			hex::encode(ch.channel_id.0),
 			ch.counterparty_node_id,
 			ch.is_channel_ready,
 			ch.channel_value_sats,
-			millisats_to_sats(ch.balance_msat),
 			ch.funding_txo
 		);
 	}
 }
 
-fn connect_peer(node: &Node<SqliteStore>, peer_pubkey: PublicKey, peer_addr: SocketAddress) {
+fn connect_peer(node: &Node, peer_pubkey: PublicKey, peer_addr: SocketAddress) {
 	match node.connect(peer_pubkey, peer_addr.clone(), true) {
 		Err(e) => println!("ERROR: Could not connect to peer {} {} {}", peer_pubkey, peer_addr, e),
 		Ok(_) => println!("Connected to peer node {} {}", peer_pubkey, peer_addr),
 	}
 }
 
-fn disconnect_peer(node: &Node<SqliteStore>, peer_pubkey: PublicKey) {
+fn disconnect_peer(node: &Node, peer_pubkey: PublicKey) {
 	match node.disconnect(peer_pubkey) {
 		Err(e) => println!("ERROR: Could not disconnect from peer {} {}", peer_pubkey, e),
 		Ok(_) => println!("Disconnected from peer node {}", peer_pubkey),
 	}
 }
 
-fn get_listen_address(node: &Node<SqliteStore>) -> String {
+fn get_listen_address(node: &Node) -> String {
 	if let Some(addrs) = node.listening_addresses() {
 		if addrs.len() >= 1 {
 			return addrs[0].to_string();
@@ -223,48 +223,53 @@ fn get_listen_address(node: &Node<SqliteStore>) -> String {
 	"(not listening)".to_string()
 }
 
-fn open_channel(
-	node: &Node<SqliteStore>, node_id: PublicKey, peer_addr: SocketAddress, chan_amt_sat: u64,
-) {
-	// check balance
-	let current_spendable_onchain_balance_sats = node.spendable_onchain_balance_sats().unwrap_or(0);
-	println!("balances {} {}", current_spendable_onchain_balance_sats, chan_amt_sat);
-	if chan_amt_sat > current_spendable_onchain_balance_sats {
-		println!(
-			"Error: Current spendable onchain balance is less than required, {} sats",
-			current_spendable_onchain_balance_sats
-		);
-		println!(
-			"       Use 'newonchainaddress' to get an address, and send funds to it (onchain)"
-		);
-		return;
-	}
+// fn open_channel(node: &Node, node_id: PublicKey, peer_addr: SocketAddress, chan_amt_sat: u64) {
+// 	// check balance
+// 	let current_spendable_onchain_balance_sats = node.spendable_onchain_balance_sats().unwrap_or(0);
+// 	println!("balances {} {}", current_spendable_onchain_balance_sats, chan_amt_sat);
+// 	if chan_amt_sat > current_spendable_onchain_balance_sats {
+// 		println!(
+// 			"Error: Current spendable onchain balance is less than required, {} sats",
+// 			current_spendable_onchain_balance_sats
+// 		);
+// 		println!(
+// 			"       Use 'newonchainaddress' to get an address, and send funds to it (onchain)"
+// 		);
+// 		return;
+// 	}
 
-	match node.connect_open_channel(node_id, peer_addr, chan_amt_sat, None, None, true) {
-		Err(e) => println!("Error opening channel: {e}"),
-		Ok(()) => println!(
-			"Channel opened with capacity {} to node {}",
-			chan_amt_sat,
-			node_id.to_string()
-		),
-	}
-}
+// 	match node.connect_open_channel(node_id, peer_addr, chan_amt_sat, None, None, true) {
+// 		Err(e) => println!("Error opening channel: {e}"),
+// 		Ok(()) => println!(
+// 			"Channel opened with capacity {} to node {}",
+// 			chan_amt_sat,
+// 			node_id.to_string()
+// 		),
+// 	}
+// }
 
-fn close_channel(node: &Node<SqliteStore>, channel_id: &ChannelId, node_id: PublicKey) {
-	match node.close_channel(channel_id, node_id) {
-		Err(e) => println!("Error opening channel: {e}"),
-		Ok(()) => println!("Channel closed, {} {}", hex::encode(channel_id.0), node_id),
-	}
-}
+// fn close_channel(node: &Node, channel_id: &ChannelId, node_id: PublicKey) {
+// 	match node.close_channel(channel_id, node_id) {
+// 		Err(e) => println!("Error opening channel: {e}"),
+// 		Ok(()) => println!("Channel closed, {} {}", hex::encode(channel_id.0), node_id),
+// 	}
+// }
 
-fn send_payment(node: &Node<SqliteStore>, invoice: &Bolt11Invoice) {
-	match node.send_payment(invoice) {
+fn send_bolt11_payment(node: &Node, invoice: &Bolt11Invoice) {
+	match node.bolt11_payment().send(invoice) {
 		Err(e) => println!("ERROR: Could not send payment, {} {}", e, invoice),
 		Ok(payment_hash) => println!("Payment sent, hash {}", hex::encode(payment_hash.0)),
 	}
 }
 
-fn list_payments(node: &Node<SqliteStore>) {
+fn send_bolt12_payment(node: &Node, offer: &Offer) {
+	match node.bolt12_payment().send(offer, None) {
+		Err(e) => println!("ERROR: Could not send payment, {} {}", e, offer),
+		Ok(payment_id) => println!("Payment sent, hash {}", hex::encode(payment_id.0)),
+	}
+}
+
+fn list_payments(node: &Node) {
 	let payments = node.list_payments();
 	if payments.len() == 0 {
 		println!("No payments found");
@@ -282,15 +287,22 @@ fn list_payments(node: &Node<SqliteStore>) {
 	}
 }
 
-fn create_invoice(node: &Node<SqliteStore>, amount_msat: u64, description: &str) {
-	match node.receive_payment(amount_msat, description, 999999) {
+fn create_invoice(node: &Node, amount_msat: u64, description: &str) {
+	match node.bolt11_payment().receive(amount_msat, description, 999999) {
 		Err(e) => println!("Error creating invoice, {e}"),
 		Ok(invoice) => println!("Invoice: {}", invoice.to_string()),
 	}
 }
 
-fn new_onchain_address(node: &Node<SqliteStore>) {
-	match node.new_onchain_address() {
+fn create_offer(node: &Node, amount_msat: u64, description: &str) {
+	match node.bolt12_payment().receive(amount_msat, description) {
+		Err(e) => println!("Error creating invoice, {e}"),
+		Ok(offer) => println!("Offer: {}", offer.to_string()),
+	}
+}
+
+fn new_onchain_address(node: &Node) {
+	match node.onchain_payment().new_address() {
 		Err(e) => println!("Error: {}", e),
 		Ok(a) => {
 			let onchain_address_str = a.to_string();
@@ -302,48 +314,25 @@ fn new_onchain_address(node: &Node<SqliteStore>) {
 	}
 }
 
-fn get_balances(node: &Node<SqliteStore>) {
-	let onchain_spendable = match node.spendable_onchain_balance_sats() {
-		Ok(b) => b,
-		Err(e) => {
-			println!("Error: Cannot retrieve balance, {e}");
-			0
-		}
-	};
-	let onchain_total = match node.total_onchain_balance_sats() {
-		Ok(b) => b,
-		Err(e) => {
-			println!("Error: Cannot retrieve balance, {e}");
-			0
-		}
-	};
-	let channels = node.list_channels();
-	let ln_total = millisats_to_sats(channels.iter().map(|c| c.balance_msat).sum::<u64>());
-	let ln_spendable =
-		millisats_to_sats(channels.iter().map(|c| c.outbound_capacity_msat).sum::<u64>());
-	println!("Sat balances \t spendable \t total");
-	println!("onchain:     \t {} \t {}", onchain_spendable, onchain_total);
-	println!("lightning:   \t {} \t {}", ln_spendable, ln_total);
-	println!(
-		"total:       \t {} \t {}",
-		onchain_spendable + ln_spendable,
-		onchain_total + ln_total
-	);
+fn get_balances(node: &Node) {
+	let onchain_spendable = node.list_balances().spendable_onchain_balance_sats;
+
+	println!("Onchain balance: {} sats", onchain_spendable);
 }
 
-fn node_info(node: &Node<SqliteStore>) {
+fn node_info(node: &Node) {
 	println!("Node info:");
 	println!("node pubkey:            \t{}", node.node_id());
 	let channels = node.list_channels();
 	println!("No. of channels:        \t{}", channels.len());
 	println!("No. of usable channels: \t{}", channels.iter().filter(|c| c.is_usable).count());
-	let local_balance_msat = channels.iter().map(|c| c.balance_msat).sum::<u64>();
-	println!("Local balance (msat):   \t{}", local_balance_msat);
+	// let local_balance_msat = channels.iter().map(|c| c.balance_msat).sum::<u64>();
+	// println!("Local balance (msat):   \t{}", local_balance_msat);
 	let peers = node.list_peers();
 	println!("No. of peers:           \t{}", peers.len());
 }
 
-pub(crate) fn poll_for_user_input(node: &Node<SqliteStore>) {
+pub(crate) fn poll_for_user_input(node: &Node) {
 	println!("Enter \"help\" to view available commands. Press Ctrl-D to quit.");
 	loop {
 		print!("> ");
@@ -385,7 +374,7 @@ pub(crate) fn poll_for_user_input(node: &Node<SqliteStore>) {
 						continue;
 					}
 
-					open_channel(node, pubkey, peer_addr, chan_amt_sat.unwrap());
+					//open_channel(node, pubkey, peer_addr, chan_amt_sat.unwrap());
 				}
 				"sendpayment" => {
 					let invoice_str = words.next();
@@ -402,7 +391,7 @@ pub(crate) fn poll_for_user_input(node: &Node<SqliteStore>) {
 						}
 					};
 
-					send_payment(node, &invoice);
+					send_bolt11_payment(node, &invoice);
 				}
 				"getinvoice" => {
 					let amt_str = words.next();
@@ -499,7 +488,7 @@ pub(crate) fn poll_for_user_input(node: &Node<SqliteStore>) {
 						}
 					};
 
-					close_channel(&node, &channel_id, peer_pubkey);
+					//close_channel(&node, &channel_id, peer_pubkey);
 				}
 				"listpeers" => list_peers(node),
 				"newonchainaddress" => new_onchain_address(node),
