@@ -33,7 +33,7 @@ const DEFAULT_ESPLORA_SERVER: &str = "blockstream.info";
 
 impl AppSettings {
 	fn default() -> Self {
-		let network = Network::Testnet;
+		let network = Network::Bitcoin;
 		Self {
 			ldk_storage_dir_path: "datadir".to_owned(),
 			ldk_peer_listening_port: 9735,
