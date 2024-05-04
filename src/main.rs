@@ -250,7 +250,7 @@ fn open_channel(node: &Node, node_id: PublicKey, peer_addr: SocketAddress, chan_
 }
 
 fn close_channel(node: &Node, channel_id: &UserChannelId, node_id: PublicKey, force: bool) {
-	match node.close_channel(channel_id, node_id, force) {
+	match node.close_channel(channel_id, node_id) {
 		Err(e) => println!("Error closing channel: {e}"),
 		Ok(()) => println!("Channel closed, {} {}", channel_id.0, node_id),
 	}
@@ -598,7 +598,7 @@ fn main() {
 	config.storage_dir_path = datadir.to_str().unwrap().to_string();
 	config.network = settings.network;
 	config.listening_addresses = Some(vec![SocketAddress::from_str(&format!(
-		"localhost:{}",
+		"0.0.0.0:{}",
 		settings.ldk_peer_listening_port
 	))
 	.unwrap()]);
